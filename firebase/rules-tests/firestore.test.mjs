@@ -16,6 +16,7 @@ const LINK_HOLDER = 'uid_link_holder'; // anonymous, has only the pot share link
 
 const EVENT = 'event_dana';
 const WL = 'wishlist_dana';
+const PUB_WL = 'wishlist_dana_public';
 const POT = 'pot_open';
 const DRAFT = 'pot_draft';
 const NO_HIDDEN = 'pot_missing_field';
@@ -47,12 +48,23 @@ before(async () => {
     await setDoc(doc(db, 'wishlists', WL), { id: WL, ownerId: DANA, eventIds: [EVENT], isPublic: false, title: 'Birthday list' });
     await setDoc(doc(db, 'wishlists', WL, 'items', 'item_1'), { id: 'item_1', title: 'E-reader', wishlistId: WL });
     await setDoc(doc(db, 'wishlists', WL, 'items', 'item_2'), { id: 'item_2', title: 'Coffee grinder', wishlistId: WL });
-    await setDoc(doc(db, 'wishlists', WL, 'claimState', 'item_1'), { itemId: 'item_1', isClaimed: true, isGroupGift: true, contributorCount: 2, potId: POT });
+    await setDoc(doc(db, 'wishlists', WL, 'claimState', 'item_1'), { itemId: 'item_1', isClaimed: true, isGroupGift: true, contributorCount: 2 });
+    await setDoc(doc(db, 'wishlists', WL, 'potState', 'item_1'), { itemId: 'item_1', potId: POT });
+    // A PUBLIC wishlist in the same event: its claimState is readable signed-out, which is
+    // exactly why potId lives in potState instead.
+    await setDoc(doc(db, 'wishlists', PUB_WL), { id: PUB_WL, ownerId: DANA, eventIds: [EVENT], isPublic: true, title: 'Public list' });
+    await setDoc(doc(db, 'wishlists', PUB_WL, 'potState', 'item_9'), { itemId: 'item_9', potId: 'pot_public' });
     await setDoc(doc(db, 'wishlists', WL, 'reveals', 'item_1'), { potId: POT, giftTitle: 'E-reader', revealAt: past });
     await setDoc(doc(db, 'wishlists', WL, 'reveals', 'item_2'), { potId: 'pot_later', giftTitle: 'Coffee grinder', revealAt: future });
 
     await setDoc(doc(db, 'claims', 'claim_pot'), {
       id: 'claim_pot', claimerId: P1, potId: POT, wishlistId: WL, itemId: 'item_1', wishlistOwnerId: DANA, isGroupGift: true, eventId: EVENT,
+    });
+    await setDoc(doc(db, 'claims', 'claim_null_pot'), {
+      id: 'claim_null_pot', claimerId: P2, potId: null, wishlistId: WL, itemId: 'item_3', wishlistOwnerId: DANA, isGroupGift: false, eventId: EVENT,
+    });
+    await setDoc(doc(db, 'claims', 'claim_empty_pot'), {
+      id: 'claim_empty_pot', claimerId: P2, potId: '', wishlistId: WL, itemId: 'item_4', wishlistOwnerId: DANA, isGroupGift: false, eventId: EVENT,
     });
     await setDoc(doc(db, 'claims', 'claim_plain'), {
       id: 'claim_plain', claimerId: P2, wishlistId: WL, itemId: 'item_2', wishlistOwnerId: DANA, isGroupGift: false, eventId: EVENT,
@@ -140,12 +152,41 @@ describe('ported production rules', () => {
     await assertFails(deleteDoc(doc(as(P1), 'claims', 'claim_pot')));
   });
 
+  test('potId null or empty means "no pot", so the claimer can still unclaim', async () => {
+    await assertSucceeds(deleteDoc(doc(as(P2), 'claims', 'claim_null_pot')));
+    await assertSucceeds(deleteDoc(doc(as(P2), 'claims', 'claim_empty_pot')));
+  });
+
   test('clients cannot write locks, claim state, event codes or rate limits', async () => {
     const db = as(P1);
     await assertFails(setDoc(doc(db, 'claimLocks', `${WL}_item_2`), { isGroupGift: false }));
     await assertFails(setDoc(doc(db, 'wishlists', WL, 'claimState', 'item_2'), { isClaimed: true }));
     await assertFails(setDoc(doc(db, 'eventCodes', 'ZZZZZZ'), { eventId: EVENT }));
     await assertFails(setDoc(doc(db, 'rateLimits', 'x'), { count: 0 }));
+  });
+});
+
+describe('pot discovery (potState)', () => {
+  test('event participants, including joined guests, can get and list potState', async () => {
+    await assertSucceeds(getDoc(doc(as(P1), 'wishlists', WL, 'potState', 'item_1')));
+    await assertSucceeds(getDocs(collection(as(P1), 'wishlists', WL, 'potState')));
+    await assertSucceeds(getDoc(doc(anon(GUEST), 'wishlists', WL, 'potState', 'item_1')));
+  });
+
+  test('the wishlist owner can never read potState, on a private or a public list', async () => {
+    await assertFails(getDoc(doc(as(DANA), 'wishlists', WL, 'potState', 'item_1')));
+    await assertFails(getDocs(collection(as(DANA), 'wishlists', WL, 'potState')));
+    await assertFails(getDoc(doc(as(DANA), 'wishlists', PUB_WL, 'potState', 'item_9')));
+  });
+
+  test('signed-out and anonymous non-participants cannot read potState, even on a PUBLIC wishlist', async () => {
+    await assertFails(getDoc(doc(nobody(), 'wishlists', PUB_WL, 'potState', 'item_9')));
+    await assertFails(getDoc(doc(anon(LINK_HOLDER), 'wishlists', PUB_WL, 'potState', 'item_9')));
+    await assertFails(getDocs(collection(nobody(), 'wishlists', PUB_WL, 'potState')));
+  });
+
+  test('clients cannot write potState', async () => {
+    await assertFails(setDoc(doc(as(P1), 'wishlists', WL, 'potState', 'item_2'), { potId: 'x' }));
   });
 });
 

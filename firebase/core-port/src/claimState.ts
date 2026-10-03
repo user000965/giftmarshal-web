@@ -11,9 +11,16 @@ export interface ClaimLike {
 }
 
 export interface DerivedClaimState {
+  /** What participants see on the mirror. */
   isGroupGift: boolean;
+  /** What the lock says: may the legacy claim paths join this item? Never for a pot. */
+  isJoinableGroupGift: boolean;
   contributorCount: number;
-  potId: string | null;
+}
+
+/** A claim owned by a pot. null and '' mean "no pot", matching the claims delete rule. */
+export function claimHasPot(claim: ClaimLike): boolean {
+  return typeof claim.potId === 'string' && claim.potId.length > 0;
 }
 
 /** A claim stops reserving its item once its event is archived (production spec 7.1). */
@@ -30,15 +37,16 @@ export function deriveClaimState(claims: ClaimLike[]): DerivedClaimState | null 
   if (active.length === 0) return null;
   return {
     isGroupGift: active.every((claim) => claim.isGroupGift === true),
+    // Pots take money through PayPal, so the legacy paths must never stack onto them.
+    isJoinableGroupGift: active.every((claim) => claim.isGroupGift === true && !claimHasPot(claim)),
     contributorCount: active.reduce(
       (total, claim) => total + (typeof claim.contributorCount === 'number' ? claim.contributorCount : 1),
       0,
     ),
-    potId: active.find((claim) => typeof claim.potId === 'string' && claim.potId.length > 0)?.potId ?? null,
   };
 }
 
-/** Only these fields change the mirror; anything else (isPurchased, reminders) must not trigger a recompute. */
+/** Only these fields change the lock or mirror; anything else (isPurchased, reminders) must not trigger a recompute. */
 export function claimSignature(claim: ClaimLike | null): string {
   if (!claim) return '';
   return [
@@ -54,8 +62,8 @@ export function claimSignature(claim: ClaimLike | null): string {
 /**
  * Recompute the lock (claimLocks/{wishlistId}_{itemId}) and the de-identified mirror
  * (wishlists/{id}/claimState/{itemId}) from the claims collection. The mirror never
- * carries claimer identity; potId lets event members open the pot from the item card,
- * and the wishlist owner can never read the mirror (path-derived rule).
+ * carries claimer identity, and never potId: on a public wishlist it is readable
+ * signed-out, so the recipient could find her own pot. Pot discovery is potState.
  */
 export async function syncItemClaimState(db: Firestore, wishlistId: string, itemId: string): Promise<void> {
   const snapshot = await db.collection('claims')
@@ -73,13 +81,12 @@ export async function syncItemClaimState(db: Firestore, wishlistId: string, item
 
   await Promise.all([
     // merge, and no lockedAt: that field belongs to whichever call first reserved the item.
-    lockRef.set({ wishlistId, itemId, isGroupGift: derived.isGroupGift, updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
+    lockRef.set({ wishlistId, itemId, isGroupGift: derived.isJoinableGroupGift, updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
     stateRef.set({
       itemId,
       isClaimed: true,
       isGroupGift: derived.isGroupGift,
       contributorCount: derived.contributorCount,
-      potId: derived.potId,
       updatedAt: FieldValue.serverTimestamp(),
     }),
   ]);

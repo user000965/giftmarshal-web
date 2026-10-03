@@ -14,7 +14,7 @@ test('onEventCreated mints a 6-character code and its eventCodes lookup', async 
   assert.equal((await db.collection('eventCodes').doc(code).get()).get('eventId'), id);
 });
 
-test('onClaimWritten mirrors a pot claim with potId, and frees the item when the claim goes', async () => {
+test('onClaimWritten mirrors a pot claim WITHOUT potId, locks it as not joinable, and frees the item when it goes', async () => {
   const db = adminDb();
   const wl = `wl_${Date.now()}`;
   const claimId = `claim_${Date.now()}`;
@@ -29,9 +29,9 @@ test('onClaimWritten mirrors a pot claim with potId, and frees the item when the
   });
   assert.equal(state.isClaimed, true);
   assert.equal(state.isGroupGift, true);
-  assert.equal(state.potId, 'pot_1');
+  assert.equal(state.potId, undefined, 'potId must never be on the (publicly readable) mirror');
   assert.equal(state.claimerId, undefined, 'the mirror must never carry claimer identity');
-  assert.equal((await db.doc(`claimLocks/${wl}_item_1`).get()).get('isGroupGift'), true);
+  assert.equal((await db.doc(`claimLocks/${wl}_item_1`).get()).get('isGroupGift'), false, 'a pot item is not joinable');
 
   await db.collection('claims').doc(claimId).delete();
   await waitFor(async () => !(await db.doc(`wishlists/${wl}/claimState/item_1`).get()).exists);

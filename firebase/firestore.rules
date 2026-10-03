@@ -242,13 +242,25 @@ service cloud.firestore {
       }
 
       // De-identified claim state, written only by onClaimWritten. Never carries claimer
-      // identity; potId lets event members open the pot. The owner can never read it.
+      // identity, and never potId: on a public wishlist it is readable signed-out, so the
+      // recipient could find her own pot. Pot discovery is potState, below.
       match /claimState/{itemId} {
         allow read: if !isWishlistOwner(wishlistId) && (
           get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.isPublic == true ||
           (isAuthenticated() &&
            isParticipantOfAnyLinkedEvent(get(/databases/$(database)/documents/wishlists/$(wishlistId)).data))
         );
+        allow write: if false;
+      }
+
+      // NEW: which pot owns an item, so event members can open it from the item card.
+      // { itemId, potId }, written by the pots functions. Deliberately NO isPublic branch:
+      // a signed-out or anonymous visitor (the recipient in a private window) must never
+      // learn a pot exists. Owner excluded by path, so this is decidable for list too.
+      match /potState/{itemId} {
+        allow read: if isAuthenticated() &&
+          !isWishlistOwner(wishlistId) &&
+          isParticipantOfAnyLinkedEvent(get(/databases/$(database)/documents/wishlists/$(wishlistId)).data);
         allow write: if false;
       }
 
@@ -273,9 +285,11 @@ service cloud.firestore {
 
       // CHANGED: a claim owned by a pot is released only by the pot, which voids every
       // hold first. A direct delete would free the item while contributors' money is held.
+      // potId null or '' means "no pot" (same as claimHasPot). Map.get is safe here: this
+      // is a single-document delete, not a list.
       allow delete: if isAuthenticated() &&
         resource.data.claimerId == request.auth.uid &&
-        !resource.data.keys().hasAny(['potId']);
+        (resource.data.get('potId', null) == null || resource.data.get('potId', null) == '');
     }
 
     match /{path=**}/participants/{participantId} {

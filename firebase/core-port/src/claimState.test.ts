@@ -8,12 +8,21 @@ describe('deriveClaimState', () => {
   });
 
   it('counts a plain claim as one contributor, not a group gift', () => {
-    expect(deriveClaimState([{ isGroupGift: false }])).toEqual({ isGroupGift: false, contributorCount: 1, potId: null });
+    expect(deriveClaimState([{ isGroupGift: false }])).toEqual({ isGroupGift: false, isJoinableGroupGift: false, contributorCount: 1 });
   });
 
-  it('carries a pot claim\'s potId and contributor count into the mirror', () => {
+  it('shows a pot as a group gift but locks it as NOT joinable (pots take money through PayPal)', () => {
     expect(deriveClaimState([{ isGroupGift: true, contributorCount: 4, potId: 'pot_1' }]))
-      .toEqual({ isGroupGift: true, contributorCount: 4, potId: 'pot_1' });
+      .toEqual({ isGroupGift: true, isJoinableGroupGift: false, contributorCount: 4 });
+  });
+
+  it('keeps a legacy group gift joinable', () => {
+    expect(deriveClaimState([{ isGroupGift: true, contributorCount: 2 }]))
+      .toEqual({ isGroupGift: true, isJoinableGroupGift: true, contributorCount: 2 });
+  });
+
+  it('treats potId null or empty as "no pot"', () => {
+    expect(deriveClaimState([{ isGroupGift: true, potId: '' }])?.isJoinableGroupGift).toBe(true);
   });
 
   it('is a group gift only if EVERY live claim is one (production lock semantics)', () => {
@@ -22,12 +31,12 @@ describe('deriveClaimState', () => {
 
   it('ignores claims hidden after their event', () => {
     expect(deriveClaimState([{ isGroupGift: true, contributorCount: 3, potId: 'p' }, { hiddenPostEvent: true }]))
-      .toEqual({ isGroupGift: true, contributorCount: 3, potId: 'p' });
+      .toEqual({ isGroupGift: true, isJoinableGroupGift: false, contributorCount: 3 });
   });
 });
 
 describe('claimSignature', () => {
-  it('changes when potId changes, so the mirror is refreshed', () => {
+  it('changes when potId changes, so the lock is recomputed', () => {
     expect(claimSignature({ wishlistId: 'w', itemId: 'i', potId: 'a' }))
       .not.toBe(claimSignature({ wishlistId: 'w', itemId: 'i', potId: 'b' }));
   });
