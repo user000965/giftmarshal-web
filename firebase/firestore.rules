@@ -1,0 +1,333 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Ported from the Gift Marshal production rules (2026-10-03) for the demo project,
+    // plus the pots collections. Ported blocks keep production semantics so the merge
+    // back stays a copy, not a redesign; differences are marked CHANGED with the reason.
+
+    // =========================================================================
+    // Helper functions (ported)
+    // =========================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Anonymous sign-in is enabled for the web, so isAuthenticated() alone means
+    // "anyone on the internet". Exposing other users' data requires a real account.
+    function isRealUser() {
+      return isAuthenticated() &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isEventParticipant(eventId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/events/$(eventId)/participants/$(request.auth.uid));
+    }
+
+    function isEventOrganizer(eventId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/events/$(eventId)/participants/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/events/$(eventId)/participants/$(request.auth.uid)).data.role == 'Organizer';
+    }
+
+    // Path-derived, so it is decidable for list as well as get.
+    function isWishlistOwner(wishlistId) {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId == request.auth.uid;
+    }
+
+    function premiumFields() {
+      return [
+        'isPremium', 'subscriptionStatus', 'subscriptionExpiry',
+        'productId', 'originalTransactionId', 'premiumSince', 'isAdmin'
+      ];
+    }
+
+    // NEW. Path-derived from the pots/{potId} wildcard, so usable in list rules.
+    function isPotStarter(potId) {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/pots/$(potId)).data.starterId == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Users (ported)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isRealUser();
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+        !request.resource.data.keys().hasAny(premiumFields());
+      allow update: if isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(premiumFields());
+      allow delete: if false;
+
+      match /private/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Premium and admin state: unreadable and unwritable by ANY client.
+      match /entitlements/{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // =========================================================================
+    // Events (ported)
+    // =========================================================================
+    match /events/{eventId} {
+      // Knowing the event id IS the capability (the shareable-link model).
+      allow get: if resource.data.isPublic == true || isAuthenticated();
+
+      // CHANGED: production keeps list open for its shipped iOS build (transitional).
+      // This project has no legacy client, so it is closed. "My events" is the
+      // collection-group participants query below.
+      allow list: if false;
+
+      allow create: if isRealUser() &&
+        request.resource.data.organizerId == request.auth.uid;
+
+      allow update: if isEventOrganizer(eventId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'organizerId', 'eventCode', 'assignmentsGenerated', 'createdAt'
+        ]);
+
+      allow delete: if isEventOrganizer(eventId);
+
+      // Joining goes through the joinEvent callable; the only client create is the
+      // creator bootstrapping their own Organizer record.
+      match /participants/{participantId} {
+        allow read: if isEventParticipant(eventId);
+
+        allow create: if isAuthenticated() &&
+          participantId == request.auth.uid &&
+          request.resource.data.role == 'Organizer' &&
+          get(/databases/$(database)/documents/events/$(eventId)).data.organizerId == request.auth.uid;
+
+        allow update: if
+          (isEventOrganizer(eventId) &&
+           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+             'secretSantaAssignedTo', 'assignedAt', 'id', 'eventId'
+           ])) ||
+          (isOwner(participantId) &&
+           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+             'role', 'secretSantaAssignedTo', 'assignedAt', 'isRecipient',
+             'isHiddenFromRecipient', 'id', 'eventId'
+           ]));
+
+        allow delete: if isEventOrganizer(eventId) || isOwner(participantId);
+      }
+
+      match /assignments/{giverId} {
+        allow read: if isAuthenticated() && giverId == request.auth.uid;
+        allow write: if false;
+      }
+    }
+
+    // =========================================================================
+    // Wishlists (ported, plus reveals)
+    // =========================================================================
+
+    function isParticipantOfAnyLinkedEvent(wishlistData) {
+      let eventIds = wishlistData.eventIds;
+      return eventIds != null && eventIds.size() > 0 && (
+        (eventIds.size() >= 1 && isEventParticipant(eventIds[0])) ||
+        (eventIds.size() >= 2 && isEventParticipant(eventIds[1])) ||
+        (eventIds.size() >= 3 && isEventParticipant(eventIds[2])) ||
+        (eventIds.size() >= 4 && isEventParticipant(eventIds[3])) ||
+        (eventIds.size() >= 5 && isEventParticipant(eventIds[4]))
+      );
+    }
+
+    function canViewAnyLinkedEventItems(wishlistData) {
+      let eventIds = wishlistData.eventIds;
+      return eventIds != null && eventIds.size() > 0 && (
+        (eventIds.size() >= 1 && isEventParticipant(eventIds[0]) && canViewEventWishlistForEvent(wishlistData, eventIds[0])) ||
+        (eventIds.size() >= 2 && isEventParticipant(eventIds[1]) && canViewEventWishlistForEvent(wishlistData, eventIds[1])) ||
+        (eventIds.size() >= 3 && isEventParticipant(eventIds[2]) && canViewEventWishlistForEvent(wishlistData, eventIds[2])) ||
+        (eventIds.size() >= 4 && isEventParticipant(eventIds[3]) && canViewEventWishlistForEvent(wishlistData, eventIds[3])) ||
+        (eventIds.size() >= 5 && isEventParticipant(eventIds[4]) && canViewEventWishlistForEvent(wishlistData, eventIds[4]))
+      );
+    }
+
+    function canViewEventWishlistForEvent(wishlistData, eventId) {
+      let event = get(/databases/$(database)/documents/events/$(eventId));
+      return event.data.eventType != 'secret_santa' ||
+        (exists(/databases/$(database)/documents/events/$(eventId)/assignments/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/events/$(eventId)/assignments/$(request.auth.uid)).data.receiverId == wishlistData.ownerId);
+    }
+
+    function canModifyAnyLinkedEvent(wishlistData) {
+      let eventIds = wishlistData.eventIds;
+      return eventIds != null && eventIds.size() > 0 && (
+        (eventIds.size() >= 1 && canModifyEventWishlistForEvent(eventIds[0])) ||
+        (eventIds.size() >= 2 && canModifyEventWishlistForEvent(eventIds[1])) ||
+        (eventIds.size() >= 3 && canModifyEventWishlistForEvent(eventIds[2])) ||
+        (eventIds.size() >= 4 && canModifyEventWishlistForEvent(eventIds[3])) ||
+        (eventIds.size() >= 5 && canModifyEventWishlistForEvent(eventIds[4]))
+      );
+    }
+
+    function canModifyEventWishlistForEvent(eventId) {
+      let participant = get(/databases/$(database)/documents/events/$(eventId)/participants/$(request.auth.uid));
+      let event = get(/databases/$(database)/documents/events/$(eventId));
+      return participant.data.role == 'Organizer' && event.data.eventType != 'secret_santa';
+    }
+
+    function eventIdsWithinLimit(eventIds) {
+      return eventIds == null || eventIds.size() <= 5;
+    }
+
+    function canCreateWishlistForEvents(eventIds) {
+      return eventIdsWithinLimit(eventIds) && (
+        eventIds == null || eventIds.size() == 0 || (
+        (eventIds.size() >= 1 && canCreateWishlistForSingleEvent(eventIds[0])) &&
+        (eventIds.size() < 2 || canCreateWishlistForSingleEvent(eventIds[1])) &&
+        (eventIds.size() < 3 || canCreateWishlistForSingleEvent(eventIds[2])) &&
+        (eventIds.size() < 4 || canCreateWishlistForSingleEvent(eventIds[3])) &&
+        (eventIds.size() < 5 || canCreateWishlistForSingleEvent(eventIds[4]))
+      ));
+    }
+
+    function canCreateWishlistForSingleEvent(eventId) {
+      let event = get(/databases/$(database)/documents/events/$(eventId));
+      let participant = get(/databases/$(database)/documents/events/$(eventId)/participants/$(request.auth.uid));
+      return isEventParticipant(eventId) && (
+        event.data.eventType == 'secret_santa' ||
+        participant.data.role == 'Organizer' ||
+        participant.data.role == 'Recipient' ||
+        participant.data.isRecipient == true
+      );
+    }
+
+    match /wishlists/{wishlistId} {
+      allow read: if resource.data.isPublic == true || (
+        isAuthenticated() && (
+          resource.data.ownerId == request.auth.uid ||
+          (resource.data.eventIds != null && resource.data.eventIds.size() > 0 && isParticipantOfAnyLinkedEvent(resource.data))
+        )
+      );
+
+      allow create: if isRealUser() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.id == wishlistId &&
+        canCreateWishlistForEvents(request.resource.data.eventIds);
+
+      allow update: if (resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        (request.resource.data.eventIds == resource.data.eventIds ||
+         canCreateWishlistForEvents(request.resource.data.eventIds))) ||
+        (resource.data.eventIds != null && resource.data.eventIds.size() > 0 && canModifyAnyLinkedEvent(resource.data));
+
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow read: if get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.isPublic == true ||
+          (isAuthenticated() && (
+            get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId == request.auth.uid ||
+            (get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.eventIds != null &&
+             get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.eventIds.size() > 0 &&
+             canViewAnyLinkedEventItems(get(/databases/$(database)/documents/wishlists/$(wishlistId)).data))
+          ));
+
+        allow create, update: if isRealUser() &&
+          get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.ownerId == request.auth.uid;
+
+        allow delete: if false;
+      }
+
+      // De-identified claim state, written only by onClaimWritten. Never carries claimer
+      // identity; potId lets event members open the pot. The owner can never read it.
+      match /claimState/{itemId} {
+        allow read: if !isWishlistOwner(wishlistId) && (
+          get(/databases/$(database)/documents/wishlists/$(wishlistId)).data.isPublic == true ||
+          (isAuthenticated() &&
+           isParticipantOfAnyLinkedEvent(get(/databases/$(database)/documents/wishlists/$(wishlistId)).data))
+        );
+        allow write: if false;
+      }
+
+      // NEW (spec A.4): the reveal, readable by the wishlist owner only once revealAt passes.
+      match /reveals/{itemId} {
+        allow get: if isWishlistOwner(wishlistId) &&
+          resource.data.keys().hasAll(['revealAt']) &&
+          resource.data.revealAt <= request.time;
+        allow list: if false;
+        allow write: if false;
+      }
+    }
+
+    // =========================================================================
+    // Claims (ported)
+    // =========================================================================
+    match /claims/{claimId} {
+      allow get, list: if isAuthenticated() &&
+        resource.data.claimerId == request.auth.uid;
+
+      allow create, update: if false;
+
+      // CHANGED: a claim owned by a pot is released only by the pot, which voids every
+      // hold first. A direct delete would free the item while contributors' money is held.
+      allow delete: if isAuthenticated() &&
+        resource.data.claimerId == request.auth.uid &&
+        !resource.data.keys().hasAny(['potId']);
+    }
+
+    match /{path=**}/participants/{participantId} {
+      allow read: if isAuthenticated() && resource.data.id == request.auth.uid;
+    }
+
+    // =========================================================================
+    // Server-only collections
+    // =========================================================================
+    match /eventCodes/{code} {
+      allow read, write: if false;
+    }
+
+    match /claimLocks/{lockId} {
+      allow read, write: if false;
+    }
+
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
+    }
+
+    match /paypalEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Pots (NEW, spec Appendix A.4)
+    // =========================================================================
+    match /pots/{potId} {
+      // hasAll first: a pot missing any of these fields is denied rather than erroring a query.
+      allow get: if isAuthenticated() &&
+        resource.data.keys().hasAll(['hiddenFromUid', 'status', 'starterId']) &&
+        resource.data.hiddenFromUid != request.auth.uid &&
+        (resource.data.status != 'draft' || resource.data.starterId == request.auth.uid);
+
+      // Only the starter's dashboard query, where('starterId', '==', me), can imply this.
+      allow list: if isAuthenticated() &&
+        resource.data.starterId == request.auth.uid;
+
+      allow write: if false;
+
+      match /pledges/{pledgeUid} {
+        allow get: if isAuthenticated() &&
+          (pledgeUid == request.auth.uid || isPotStarter(potId));
+        allow list: if isPotStarter(potId);
+        allow write: if false;
+      }
+
+      match /private/{docId} {
+        allow read: if isPotStarter(potId);
+        allow write: if false;
+      }
+    }
+  }
+}
