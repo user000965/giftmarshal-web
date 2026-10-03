@@ -3,7 +3,7 @@
   "private": true,
   "description": "Security-rules tests. npm test starts the Firestore emulator.",
   "scripts": {
-    "test": "firebase emulators:exec --only firestore --project demo-giftmarshal-rules \"node --test firestore.test.mjs\""
+    "test": "firebase --config ../firebase.emulators.json emulators:exec --only firestore --project demo-giftmarshal-rules \"node --test firestore.test.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

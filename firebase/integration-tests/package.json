@@ -4,7 +4,7 @@
   "description": "Drives the real triggers and callables against the emulator suite.",
   "scripts": {
     "pretest": "npm --prefix ../core-port run build && npm --prefix ../functions run build",
-    "test": "cd .. && firebase emulators:exec --only auth,firestore,functions --project demo-giftmarshal \"node --test --test-concurrency=1 --test-timeout=120000 integration-tests/*.test.mjs\""
+    "test": "cd .. && firebase --config firebase.emulators.json emulators:exec --only auth,firestore,functions --project demo-giftmarshal \"node --test --test-concurrency=1 --test-timeout=120000 integration-tests/*.test.mjs\""
   },
   "devDependencies": {
     "firebase": "^12.19.0",

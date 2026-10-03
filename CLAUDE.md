@@ -11,8 +11,10 @@ Gift Marshal Pots: all-or-nothing group gifts on PayPal (sandbox), and the first
 |---|---|
 | `web/` | Next.js (App Router) on Firebase App Hosting |
 | `firebase/functions/` | functions codebase **`web`**: everything new. This is what eventually deploys to production |
-| `firebase/core-port/` | functions codebase **`core-port`**: ports of `onEventCreated` and `onClaimWritten`. **Demo project only, never deploy to production**, where the originals run and the names would collide |
-| `firebase/firestore.rules` | The security model. Ported blocks are marked; `CHANGED` blocks say why |
+| `firebase/core-port/` | functions codebase **`core-port`**: ports of `onEventCreated` and `onClaimWritten`. **Emulators only, never deployed.** Production runs the originals under the same names |
+| `firebase/firestore.rules` | The security model as tested on the emulators. Ported blocks are marked; `CHANGED` blocks say why. **Never deployed from here**: production's rules include these blocks and are deployed from the production backend repo |
+| `firebase/firebase.json` | The **deployable** config: functions codebase `web` only. `firebase deploy --project prod --only functions:web` |
+| `firebase/firebase.emulators.json` | The **emulator** config: rules plus both codebases. The test suites use it via `--config`. Any deploy with it is refused by `refuse-deploy.mjs` |
 | `firebase/rules-tests/`, `firebase/integration-tests/` | Emulator suites |
 | `spikes/paypal/` | Throwaway PayPal sandbox spikes and `FINDINGS.md`. Nothing imports them |
 
