@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.example
+lib/
+.next/
+out/
+coverage/
+*.log
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.DS_Store
+spikes/paypal/out/
