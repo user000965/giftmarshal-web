@@ -2,7 +2,9 @@ node_modules/
 .env
 .env.*
 !.env.example
-lib/
+# Functions build output only. A bare `lib/` also matched web/lib (source code).
+/firebase/core-port/lib/
+/firebase/functions/lib/
 .next/
 out/
 coverage/
