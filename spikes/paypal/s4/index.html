@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>S4 spike: authorize $25 (sandbox)</title>
+  <!-- No SRI: the PayPal SDK is generated per query string, so it has no stable hash. Local spike only. -->
+  <script src="https://www.paypal.com/sdk/js?client-id=__CLIENT_ID__&intent=authorize&currency=USD&components=buttons"></script>
+</head>
+<body>
+  <h1>S4: authorize $25 (sandbox)</h1>
+  <div id="paypal"></div>
+  <pre id="out"></pre>
+  <script>
+    const out = (x) => { document.getElementById('out').textContent += JSON.stringify(x, null, 2) + '\n'; };
+    paypal.Buttons({
+      createOrder: async () => {
+        const r = await fetch('/api/orders', { method: 'POST' });
+        const j = await r.json();
+        out({ created: j });
+        return j.id;
+      },
+      onApprove: async (data) => {
+        const r = await fetch(`/api/orders/${data.orderID}/authorize`, { method: 'POST' });
+        const j = await r.json();
+        out({ orderStatus: j.status, authorization: j.purchase_units?.[0]?.payments?.authorizations?.[0] });
+      },
+      onCancel: (d) => out({ cancelled: d }),
+      onError: (e) => out({ error: String(e) }),
+    }).render('#paypal');
+  </script>
+</body>
+</html>
