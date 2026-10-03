@@ -1,0 +1,5 @@
+# Firebase App Hosting: project giftmarshal-pots-demo, backend pots-web, root directory web/.
+# Plan 4 adds NEXT_PUBLIC_* environment values. Plan 5 raises minInstances to 1 for judging.
+runConfig:
+  minInstances: 0
+  maxInstances: 2

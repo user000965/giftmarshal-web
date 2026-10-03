@@ -1,0 +1,16 @@
+/* D2 "Sticker card, cool" (spec 7.1). Coral is for fills and stickers, never for text. */
+:root {
+  --bg: #DCE8F0;
+  --card: #FFFFFF;
+  --ink: #14273A;
+  --ink-2: #3A5A78;
+  --track: #E7EEF3;
+  --coral: #F25C54;
+  --sun: #FFD27A;
+  --rose: #F7A6B9;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --shadow-sticker: 0 3px 4px rgb(0 0 0 / 0.18);
+  --font-display: var(--font-young-serif), Georgia, serif;
+  --font-ui: var(--font-jakarta), system-ui, sans-serif;
+}

@@ -1,0 +1,6 @@
+.card { background: var(--card); border-radius: var(--radius-card); padding: 16px; }
+.amount { margin: 0; font-weight: 800; font-size: 34px; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.of { font-size: 15px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+.track { height: 12px; border-radius: var(--radius-pill); background: var(--track); overflow: hidden; margin-top: 12px; }
+.fill { height: 100%; border-radius: var(--radius-pill); background: var(--coral); transition: width 600ms ease-out; }
+.meta { margin: 8px 0 0; display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
